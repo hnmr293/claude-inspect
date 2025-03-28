@@ -84,31 +84,38 @@ if (window.__operations === void 0) {
 const operations = ($OPERATIONS);
 
 async function process1() {
-    if (window.__operations.length > 0) {
-        const {op, args} = window.__operations[0];
-        console.log('operation:', op, args);
-        const func = operations[op];
-        if (func) {
-            try {
-                await func(...args);
-                return true;
-            } catch (error) {
-                console.log(error);
-                return false;
-            }
-        }
-
-        console.error('operation not found', op);
-        return true;
+    if (window.__operations.length == 0) {
+        return false;
     }
+    
+    console.debug('start operation');
+    
+    const {op, args} = window.__operations[0];
+    console.log('operation:', op, args);
+    const func = operations[op];
+    if (!func) {
+        throw new Error('operation not found: ' + op);
+    }
+
+    await func(...args);
+    
+    console.debug('complete operation');
+    return true;
 }
 
 function process() {
-    try {
-        if (process1()) {
+    process1().then(done => {
+        if (done) {
             window.__operations.shift();
+            if (window.__send) {
+                console.debug('start reponse');
+                const msg = 'event: ping\ndata: {"type": "ping"}\n\n';
+                const obj = (new TextEncoder()).encode(msg);
+                window.__send?.(obj);
+                console.debug('complete response');
+            }
         }
-    } catch (e) {
+    }).catch((e) => {
         // delete all operations
         console.error(e);
         window.__operations.splice(0);
@@ -117,10 +124,9 @@ function process() {
             const errObj = (new TextEncoder()).encode(errMsg);
             window.__send?.(errObj);
         }
-        throw e;
-    } finally {
+    }).finally(() => {
         setTimeout(process, 10);
-    }
+    });
 }
 
 console.log("ready!");
