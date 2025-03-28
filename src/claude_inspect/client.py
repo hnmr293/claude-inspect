@@ -180,7 +180,7 @@ class Client:
         await self.q_in.put({"op": "clear_chat"})
 
 
-async def main():
+async def amain():
     # read-eval-print loop
 
     def read() -> str:
@@ -214,6 +214,10 @@ async def main():
             await repl(client)
         except KeyboardInterrupt:
             print("Ctrl+C pressed. closing...")
+
+
+def main():
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

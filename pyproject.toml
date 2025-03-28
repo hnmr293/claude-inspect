@@ -15,6 +15,9 @@ dependencies = [
 [tool.uv.sources]
 claco = { git = "https://github.com/hnmr293/claco.git" }
 
+[project.scripts]
+chat = "claude_inspect.client:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
