@@ -4,6 +4,7 @@ import json
 import asyncio
 import time
 from contextlib import asynccontextmanager
+from functools import lru_cache
 import logging
 from typing import overload, AsyncIterator
 
@@ -12,7 +13,7 @@ import websockets
 from anthropic._streaming import SSEDecoder, ServerSentEvent
 
 from claude_inspect.process import ClaudeDesktopProcess
-from claude_inspect.script_wrapper import load_script_file
+from claude_inspect.script_wrapper import load_script_file, raw_script
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,21 @@ def _get_wd(exe_path: str) -> str:
     return natsorted(wd)[-1]
 
 
+@lru_cache(1)
+def _load_script_auto_approve():
+    code = load_script_file("auto-approve.js")
+    code = code.replace("$AUTO_APPROVE_TOOLS", json.dumps([]))
+    return code
+
+
+@lru_cache(1)
+def _load_script_inject(addr: str, port: int):
+    code = load_script_file("inject.js")
+    code = code.replace("$SERVER_URL", json.dumps(f"ws://{addr}:{port}"))
+    code = code.replace("$OPERATIONS", raw_script("_operations.js"))
+    return code
+
+
 class Client:
     """Claude for Desktop にスクリプトを注入して外部から操作を行うクラス"""
 
@@ -50,8 +66,8 @@ class Client:
             wd = _get_wd(exe_path)
 
         scripts = [
-            load_script_file("auto-approve.js").replace("$AUTO_APPROVE_TOOLS", json.dumps([])),
-            load_script_file("inject.js").replace("$SERVER_URL", json.dumps(f"ws://{addr}:{port}")),
+            _load_script_auto_approve(),
+            _load_script_inject(addr, port),
         ]
 
         self.process = ClaudeDesktopProcess(

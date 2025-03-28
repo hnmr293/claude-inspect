@@ -4,14 +4,13 @@ from functools import lru_cache
 import importlib.resources
 
 
-@lru_cache(1)
-def default_script() -> str:
-    wrapper = importlib.resources.read_text("claude_inspect.js", "wrapper.js")
-    return wrapper
+@lru_cache(8)
+def raw_script(name: str) -> str:
+    return importlib.resources.read_text("claude_inspect.js", name)
 
 
 def wrap_script_code(code: str, name: str) -> str:
-    wrapper = default_script()
+    wrapper = raw_script("_wrapper.js")
     wrapper = wrapper.replace("$NAME", json.dumps(name))
     wrapper = wrapper.replace("$CODE", code)
     return wrapper
