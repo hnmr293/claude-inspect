@@ -1,0 +1,20 @@
+[project]
+name = "claude-inspect"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.49.0",
+    "claco",
+    "natsort>=8.4.0",
+    "requests>=2.32.3",
+    "websockets>=15.0.1",
+]
+
+[tool.uv.sources]
+claco = { git = "https://github.com/hnmr293/claco.git" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
