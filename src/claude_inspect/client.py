@@ -108,16 +108,19 @@ class Client:
             logger.exception("handler error")
 
     @overload
-    async def get(self) -> bytes: ...
+    async def get(self, *, get_ping=False) -> bytes: ...
 
     @overload
-    async def get(self, timeout: float) -> bytes | None: ...
+    async def get(self, timeout: float, *, get_ping=False) -> bytes | None: ...
 
-    async def get(self, timeout: float | None = None) -> bytes | None:
+    async def get(self, timeout: float | None = None, *, get_ping=False) -> bytes | None:
         t0 = time.time()
         while timeout is None or time.time() - t0 < timeout:
             try:
-                return self.q_out.get_nowait()
+                v = self.q_out.get_nowait()
+                if isinstance(v, bytes) and v.startswith(b"event: ping\n") and not get_ping:
+                    continue
+                return v
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.01)
         return None
@@ -145,8 +148,9 @@ class Client:
             logger.info("websocket server launched")
 
             # wait for inject.js
-            ping = await self.get(1.1)
+            ping = await self.get(1.1, get_ping=True)
             if ping is None or not ping.startswith(b"event: ping"):
+                logger.error("Failed to connect to Claude")
                 raise RuntimeError("Failed to connect to Claude")
 
             yield
