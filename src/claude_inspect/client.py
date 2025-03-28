@@ -341,6 +341,11 @@ class ClaudeRepl:
                 print(f"Error: {e}")
                 continue
 
+            except EOFError:
+                # read() 中に Ctrl+C が押された
+                print("Ctrl+C pressed. closing...")
+                return
+
             except KeyboardInterrupt:
                 print("Ctrl+C pressed. closing...")
                 return
@@ -348,8 +353,11 @@ class ClaudeRepl:
 
 async def amain():
     intp = ClaudeRepl(Client())
-    async with intp.run():
-        await intp.repl()
+    try:
+        async with intp.run():
+            await intp.repl()
+    except asyncio.CancelledError:
+        print(r"\(^^)/ closed \(^^)/")
 
 
 def main():
