@@ -25,7 +25,15 @@ class SSEError(Exception):
         addr: str,
         message: str,
     ):
-        super().__init__(f"Error on SSE connection to {addr}: {message}")
+        if message.lstrip().startswith("{"):
+            try:
+                data = json.loads(message)
+                error_type = data.get("error", "unknown")
+                message = data.get("message", message)
+            except json.JSONDecodeError:
+                error_type = "unknown"
+
+        super().__init__(f"Error on SSE connection to {addr}: {error_type} {message}")
 
 
 def _get_wd(exe_path: str) -> str:
