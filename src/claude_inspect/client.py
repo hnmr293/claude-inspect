@@ -229,68 +229,127 @@ class Client:
             yield event
 
 
-async def amain():
-    # read-eval-print loop
+class ReplError(Exception):
+    pass
 
-    class ReplError(Exception):
-        pass
 
-    async def read(client: Client) -> str:
+class Command:
+    def __init__(self, op: str, args: list):
+        self.op = op
+        self.args = args
+
+    def __str__(self):
+        return f"!{self.op} {' '.join(self.args)}"
+
+
+class ClaudeRepl:
+    def __init__(self, client: Client):
+        self.client = client
+        self._context = None
+
+    @asynccontextmanager
+    async def run(self):
+        async with self.client.run():
+            yield self
+
+    def read(self) -> str:
         print(">", end=" ", flush=True)
         message = input()
         return message
 
-    async def eval(client: Client, message: str):
+    async def eval(self, message: str) -> AsyncIterator[str | ServerSentEvent]:
+        parsed = self.parse_input(message)
+
+        if isinstance(parsed, Command):
+            it = self.eval_command(parsed)
+        else:
+            it = self.eval_message(message)
+
         try:
-            if message.lstrip().startswith("!"):
-                # operate command
-                message = message.lstrip()[1:].strip()
-                if len(message) == 0:
-                    raise ReplError('usage: "!op arg1 arg2 ..."')
-                op, *args = shlex.split(message)
-                async for msg in client.call_op(op, args):
-                    if msg.event == "error":
-                        client.clear_queue()
-                        logger.error(f"Command Error: {msg.data}")
-            else:
-                # post chat message
-                async for msg in client.communicate(message):
+            async for msg in it:
+                yield msg
+        except KeyboardInterrupt:
+            print("interrupt")
+            self.client.clear_queue()
+
+    def parse_input(self, message: str) -> str | Command:
+        if not message.lstrip().startswith("!"):
+            return message
+
+        message = message.lstrip()[1:].strip()
+        if len(message) == 0:
+            raise ReplError('usage: "!op arg1 arg2 ..."')
+        op, *args = shlex.split(message)
+        return Command(op, args)
+
+    async def eval_command(self, command: Command) -> AsyncIterator[str | ServerSentEvent]:
+        try:
+            ok = True
+            async for msg in self.client.call_op(command.op, command.args):
+                if msg.event == "error":
+                    self.client.clear_queue()
+                    logger.error(f"Command Error: {msg.data}")
+                    ok = False
                     yield msg
+            if ok:
+                yield f"command {command} success"
         except SSEError as e:
             raise ReplError(str(e)) from e
 
-    def _print(msg: ServerSentEvent):
+    async def eval_message(self, message: str) -> AsyncIterator[ServerSentEvent]:
+        try:
+            async for msg in self.client.communicate(message):
+                yield msg
+        except SSEError as e:
+            raise ReplError(str(e)) from e
+
+    def print(self, msg: str | ServerSentEvent):
+        if isinstance(msg, str):
+            print(msg, flush=True)
+            return
+
+        assert isinstance(msg, ServerSentEvent), msg
+
         if msg.event == "content_block_delta":
             data = json.loads(msg.data)
             text = data["delta"]["text"]
             print(text.replace("\n\n", "\n"), end="", flush=True)
+        elif msg.event == "content_block_stop":
+            print(flush=True)
+        elif msg.event == "error":
+            e = SSEError(f"{self.client.addr}:{self.client.port}", msg.data)
+            print(str(e), flush=True)
+        else:
+            logger.debug(f"unknown event: {msg}")
 
-    async def repl(client: Client):
+    async def repl(self):
         while True:
             try:
-                message = await read(client)
+                # read
+                message = self.read()
                 if not message:
                     continue
 
-                else:
-                    async for msg in eval(client, message):
-                        _print(msg)
-                    print()
-            except KeyboardInterrupt:
-                print("interrupt")
-                client.clear_queue()
+                # eval
+                stream = self.eval(message)
+
+                # print
+                async for msg in stream:
+                    self.print(msg)
+
             except ReplError as e:
                 print(f"Error: {e}")
                 continue
 
-    # main
+            except KeyboardInterrupt:
+                print("Ctrl+C pressed. closing...")
+                return
 
-    client = Client()
-    async with client.run():
-        try:
-            await repl(client)
-        except KeyboardInterrupt:
-            print("Ctrl+C pressed. closing...")
+
+async def amain():
+    intp = ClaudeRepl(Client())
+    async with intp.run():
+        await intp.repl()
 
 
 def main():
