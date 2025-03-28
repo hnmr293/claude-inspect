@@ -42,6 +42,7 @@ class ClaudeDesktopProcess:
         self.exe_path = exe_path
         self.wd = wd
         self.inject_script = inject_script
+        self.minimize = True
         self._pid = None
         self._dev_tools_pid = None
         self._keysender = Sender()
@@ -118,8 +119,9 @@ class ClaudeDesktopProcess:
                 logger.warning(f"Failed to send keys: {e}")
             time.sleep(1)
 
-        win.minimize_window(hwnd_main)
-        win.minimize_window(hwnd_dev_tools)
+        if self.minimize:
+            win.minimize_window(hwnd_main)
+            win.minimize_window(hwnd_dev_tools)
 
         return pid_main, pid_dev_tools
 
