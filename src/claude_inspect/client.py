@@ -3,6 +3,7 @@ import glob
 import json
 import asyncio
 import time
+import shlex
 from contextlib import asynccontextmanager
 from functools import lru_cache
 import logging
@@ -163,7 +164,7 @@ class Client:
 
             yield
 
-    async def communicate(self, message: str) -> AsyncIterator[str]:
+    async def communicate(self, message: str) -> AsyncIterator[ServerSentEvent]:
         self.clear_queue()
 
         await self.put_chat(message)
@@ -192,47 +193,95 @@ class Client:
     async def run(self):
         with self.process:
             async with self.serve():
-                yield self
+                try:
+                    yield self
+                finally:
+                    await self.q_in.put(self.__CLOSE)
 
     #
     # operations
     #
 
     async def apply_chat(self):
-        await self.q_in.put({"op": "apply_chat"})
+        async for event in self.call_op("apply_chat", []):
+            if event.event == "error":
+                raise SSEError(f"{self.addr}:{self.port}", event.data)
 
     async def put_chat(self, text: str):
-        await self.q_in.put({"op": "put_chat", "args": [text]})
+        async for event in self.call_op("put_chat", [text]):
+            if event.event == "error":
+                raise SSEError(f"{self.addr}:{self.port}", event.data)
 
     async def clear_chat(self):
-        await self.q_in.put({"op": "clear_chat"})
+        async for event in self.call_op("clear_chat", []):
+            if event.event == "error":
+                raise SSEError(f"{self.addr}:{self.port}", event.data)
+
+    async def call_op(self, name: str, args: list):
+        self.clear_queue()
+        await self.q_in.put({"op": name, "args": args})
+        result = await self.get(get_ping=True)
+        decoder = SSEDecoder()
+        for line in result.decode().splitlines():
+            event = decoder.decode(line)
+            if not event:
+                continue
+            yield event
 
 
 async def amain():
     # read-eval-print loop
 
-    def read() -> str:
+    class ReplError(Exception):
+        pass
+
+    async def read(client: Client) -> str:
         print(">", end=" ", flush=True)
         message = input()
         return message
 
     async def eval(client: Client, message: str):
         try:
-            async for msg in client.communicate(message):
-                yield msg
-        except KeyboardInterrupt:
-            return
+            if message.lstrip().startswith("!"):
+                # operate command
+                message = message.lstrip()[1:].strip()
+                if len(message) == 0:
+                    raise ReplError('usage: "!op arg1 arg2 ..."')
+                op, *args = shlex.split(message)
+                async for msg in client.call_op(op, args):
+                    if msg.event == "error":
+                        client.clear_queue()
+                        logger.error(f"Command Error: {msg.data}")
+            else:
+                # post chat message
+                async for msg in client.communicate(message):
+                    yield msg
+        except SSEError as e:
+            raise ReplError(str(e)) from e
 
-    def _print(msg):
-        print(msg, end="", flush=True)
+    def _print(msg: ServerSentEvent):
+        if msg.event == "content_block_delta":
+            data = json.loads(msg.data)
+            text = data["delta"]["text"]
+            print(text.replace("\n\n", "\n"), end="", flush=True)
 
     async def repl(client: Client):
         while True:
-            message = read()
-            if not message:
+            try:
+                message = await read(client)
+                if not message:
+                    continue
+
+                else:
+                    async for msg in eval(client, message):
+                        _print(msg)
+                    print()
+            except KeyboardInterrupt:
+                print("interrupt")
+                client.clear_queue()
+            except ReplError as e:
+                print(f"Error: {e}")
                 continue
-            async for msg in eval(client, message):
-                _print(msg)
 
     # main
 
