@@ -9,13 +9,16 @@
     apply_chat: function() {
         return new Promise((resolve, reject) => {
             const inputElem = document.querySelector('.ProseMirror p');
-            if (inputElem) {
-                inputElem.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
-            } else {
+            if (!inputElem) {
                 reject('Input element not found');
+                return;
             }
+            
+            inputElem.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter'}));
+            
             function check() {
-                if (inputElem.innerText === '') {
+                const inputElem = document.querySelector('.ProseMirror p');
+                if (inputElem.textContent === '') {
                     resolve();
                 } else {
                     setTimeout(check, 10);
